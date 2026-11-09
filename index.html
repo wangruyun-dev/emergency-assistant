@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>现场应急助手 · 赛事播放故障处置</title>
+<style>
+  :root{
+    --bg:#f7f2ea; --panel:#fffdf9; --ink:#3d3831; --sub:#8a8377;
+    --accent:#8a7f4a; --accent-soft:#f3ede0; --line:#e8e0d2;
+    --bot:#fffdf9; --user:#e8dfc9; --danger:#a8642a; --danger-bg:#faf0e4;
+    --ok:#5f7a52; --ok-bg:#eef3ec;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column; max-width:640px; margin:0 auto;
+    box-shadow:0 0 40px rgba(138,127,74,.08)}
+  header{background:var(--panel); border-bottom:1px solid var(--line);
+    padding:14px 20px 12px; flex-shrink:0}
+  header h1{font-size:17px; font-weight:600; letter-spacing:.05em}
+  header p{font-size:12px; color:var(--sub); margin-top:3px}
+  .ai-tag{display:inline-block; font-size:10.5px; color:var(--accent);
+    border:1px solid var(--accent); border-radius:20px; padding:1px 9px;
+    margin-right:8px; vertical-align:1px}
+  #chat{flex:1; overflow-y:auto; padding:18px 16px 10px;
+    background:linear-gradient(180deg,var(--bg) 0%,#f4efe6 100%)}
+  .msg{display:flex; margin:10px 0; align-items:flex-start}
+  .msg.user{justify-content:flex-end}
+  .bubble{max-width:86%; border-radius:18px; padding:12px 16px;
+    font-size:15px; line-height:1.75; white-space:pre-wrap; word-break:break-word}
+  .msg.bot .bubble{background:var(--bot); border:1px solid var(--line);
+    border-top-left-radius:6px; box-shadow:0 2px 8px rgba(138,127,74,.07)}
+  .msg.user .bubble{background:var(--user); border-top-right-radius:6px}
+  .bubble .step-title{display:block; font-weight:600; color:var(--accent);
+    font-size:13px; letter-spacing:.15em; margin-bottom:6px}
+  .bubble .src{display:block; margin-top:10px; font-size:11.5px; color:var(--sub)}
+  .bubble.danger{background:var(--danger-bg); border-color:#ecd9c3}
+  .bubble.danger .step-title{color:var(--danger)}
+  .bubble .chip{display:inline-block; background:var(--accent-soft);
+    border-radius:8px; padding:2px 10px; font-size:13px; margin:2px 4px 2px 0; color:#6b6250}
+  .sugs{display:flex; flex-wrap:wrap; gap:8px; padding:4px 2px 10px; margin-top:2px}
+  .sug{background:var(--panel); border:1px solid var(--line); border-radius:20px;
+    padding:8px 16px; font-size:14px; color:var(--ink); cursor:pointer; transition:all .15s}
+  .sug:active{background:var(--accent-soft)}
+  footer{flex-shrink:0; background:var(--panel); border-top:1px solid var(--line);
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
+  #form{display:flex; gap:10px}
+  #inp{flex:1; border:1px solid var(--line); border-radius:22px;
+    padding:11px 18px; font-size:15px; background:var(--bg); color:var(--ink); outline:none}
+  #inp:focus{border-color:var(--accent)}
+  #send{border:none; background:var(--accent); color:#fff; border-radius:22px;
+    padding:0 22px; font-size:15px; cursor:pointer}
+  .typing{display:inline-flex; gap:4px; padding:6px 2px}
+  .typing i{width:6px; height:6px; border-radius:50%; background:var(--accent);
+    opacity:.4; animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}
+  .typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:.9}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="ai-tag">本回答由 AI 生成</span>现场应急助手</h1>
+  <p>赛事播放故障处置 · 优先保证赛事不中断，其次才是修好</p>
+</header>
+
+<div id="chat"></div>
+
+<footer>
+  <form id="form">
+    <input id="inp" type="text" placeholder="用一句话说说现在怎么了…" autocomplete="off" enterkeyhint="send">
+    <button id="send" type="submit">发送</button>
+  </form>
+</footer>
+
+<script>
+/* =====================================================
+   现场应急助手 · 规则引擎 v1.0
+   逻辑源：《赛事现场播放器故障应急手册》v1.1（脱敏版）
+   设计原则：紧急 > 危险 > 超范围 > 五类故障 > 追问
+===================================================== */
+
+// ---------- 知识库（14 条，现象关键词 → 处置序列） ----------
+const KB = [
+  // ---- 没声音 4 ----
+  {
+    id:'snd1', cat:'没声音', src:'手册 v1.1 第 1 节',
+    kw:['没声音','没有声音','不响','哑了','没声','无声','听不见','音响没声','音箱没声','喇叭没声','声音出不来','没音'],
+    must:['播放器在放','进度条在走'],
+    steps:[
+      {t:'第一步：找到桌上那个带一排推子的黑盒子（调音台，所有声音都先经过它），把写着「主音量 / MAIN」的那根推子，推到中间「0」刻度以上。'},
+      {t:'⚠ 拧之前先看一眼：推子本来就在「0」以上就别动它，直接回复「没成功」，我们看下一步。手放轻，一听到声音立刻停。'},
+      {t:'成功标志：音箱里有声音。\n没成功就回我：「没成功」，我给你下一步。'},
+      {t:'不要做：①不要拔总电源 ②不要把推子一下推到顶。'}
+    ],
+    next:[
+      {t:'下一步：点屏幕右下角的小喇叭图标，把音量条拉到最右边，确认上面没有红色斜杠（有斜杠＝声音被掐掉了）。\n成功标志：斜杠消失，音箱出声。\n没成功就回我：「没成功」。'},
+      {t:'下一步：把播放器连到黑盒子的那根线，两头都拔下来，再插回去，插到底。\n一次只动这一根线，动完立刻试。\n没成功就回我：「没成功」。'},
+      {t:'三步做完还没声音——已经到 3 分钟的线了。停止尝试，联系总指挥部，改用备用方案。\n这一步不是失败：优先保证赛事不中断，本来就该在现在升级。'}
+    ]
+  },
+  {
+    id:'snd2', cat:'没声音', src:'手册 v1.1 第 1 节第 2 步',
+    kw:['红色斜杠','有斜杠','静音','被静音','小喇叭','音量','喇叭图标'],
+    steps:[
+      {t:'第一步：点屏幕右下角的小喇叭图标，把音量条拉到最右边，确认图标上没有红色斜杠（有斜杠＝声音被掐掉了）。\n成功标志：斜杠消失，出声。\n没成功就回我：「没成功」。'},
+      {t:'不要做：不要进系统声音设置深处改选项——现场只做最表层这一步。'}
+    ]
+  },
+  {
+    id:'snd3', cat:'没声音', src:'手册 v1.1 第 1 节第 3 步',
+    kw:['线松','没插','接触不良','插头','松了','线缆','线没插'],
+    steps:[
+      {t:'第一步：把播放器连到黑盒子（调音台）的那根线，两头都拔下来再插回去，插到底（插头完全没入）。\n成功标志：插紧后试放一次，有声音。\n没成功就回我：「没成功」。'},
+      {t:'不要做：①比赛进行中不要动别的设备的线 ②一次只动一根线。'}
+    ]
+  },
+  {
+    id:'snd4', cat:'没声音', src:'手册 v1.1 第 1 节（推子误触场景）',
+    kw:['误触','碰了','串音','mute','muted','刚才还好好的','突然没声','一部分','通道','推子被','谁碰过'],
+    steps:[
+      {t:'第一步：看调音台上亮灯的「MUTE / 静音」键，把刚才动过的那个通道的静音取消，再确认对应推子没被碰下去。\n成功标志：该通道恢复出声。\n没成功就回我：「没成功」。'},
+      {t:'不要做：①不要乱调别的通道的旋钮——一次只恢复一个通道 ②不要比赛中重启调音台。'}
+    ]
+  },
+  // ---- 没画面 3 ----
+  {
+    id:'pic1', cat:'没画面', src:'手册 v1.1 第 2 节、附录对照表',
+    kw:['黑屏','没画面','没有画面','黑了','不显示','投影没','大屏黑','屏幕黑','没显示','画面没了'],
+    steps:[
+      {t:'分岔先判断：屏幕上有弹出的小方框 / 提示文字吗？\n有字回我「有字」，没字回我「没字」。'},
+      {t:'【有字】先拿手机把屏幕拍下来，除了「确定」别的按钮一律不点——拍完照回我「有字」，走提示框路线。\n【没字，就是黑的】回我「没字」，我们查信号线。'},
+      {t:'【没字路线·第一步】先看播放器上的进度条在不在走——在走说明电脑在正常播放，问题出在「电脑到屏幕之间」。顺着视频线把两头重新插紧。\n成功标志：屏幕出现画面。\n没成功就回我：「没成功」。'}
+    ],
+    next:[
+      {t:'【没字·下一步】用大屏的遥控器或面板按键，把输入源逐个切（HDMI1 / HDMI2 / 电脑），每切一个等 3 秒。\n不要做：不要关大屏总电源——比赛中断电再启动要等很久。\n没成功就回我：「没成功」。'},
+      {t:'两步没画面——已经到升级线：联系总指挥部，启用备用方案。比赛中优先保证不中断。'}
+    ]
+  },
+  {
+    id:'pic2', cat:'没画面', src:'手册 v1.1 第 2 节「有字」、提示词③',
+    kw:['无信号','no signal','没有信号','提示框','弹窗','跳出','提示文字'],
+    steps:[
+      {t:'第一步：拿手机把屏幕上的提示框拍下来，除了「确定」别的按钮一律不点；然后在大屏上逐个切换输入源（HDMI1 / HDMI2 / 电脑），每切一个等 3 秒。\n成功标志：切到正确通道，出现画面。\n没成功就回我：「没成功」。'},
+      {t:'下一步：把拍的照片发给现场技术负责人，按屏幕提示处理；或者回我「没成功」，我给你升级路径。\n不要做：不要点「格式化 / 重置 / 还原 / 初始化」的按钮——一点就清空。'}
+    ]
+  },
+  {
+    id:'pic3', cat:'没画面', src:'手册 v1.1 场景记录（画面比例异常）',
+    kw:['比例','不一样','副屏','扩展','只有桌面','画面不同','显示不一样','拉伸','变形'],
+    steps:[
+      {t:'第一步：在电脑上按 Win + P 键，选择「复制」模式让两块屏显示一样的内容，再把播放窗口拖回主屏。\n成功标志：大屏出现和电脑一样的播放画面。\n没成功就回我：「没成功」。'},
+      {t:'下一步：比例还不对的话，在播放器的画面设置里把比例调回「原始 / 16:9」。\n不要做：比赛中不要改显卡设置深处的参数。'}
+    ]
+  },
+  // ---- 文件打不开 2 ----
+  {
+    id:'file1', cat:'文件打不开', src:'手册 v1.1 提示词②、第 4 节',
+    kw:['文件损坏','损坏','格式不支持','打不开','无法播放','打不开发','坏了','提示错误'],
+    steps:[
+      {t:'第一步：拿手机把屏幕提示拍下来，除了「确定」别的按钮一律不点；同时记下文件名和它来自哪里（U 盘 / 硬盘 / 别人发来的）。\n成功标志：信息收集完，可以准确求助。\n没成功就回我：「没成功」。'},
+      {t:'下一步：找备用 U 盘或备用机上的同内容备份——优先保证能播，宁可用现在能响的，不要现场花时间修坏文件。\n不要做：①不要点「格式化 / 重置 / 还原 / 初始化」②不要删任何文件——运动员音乐、会徽视频删了找不回来。'},
+      {t:'找不到备份：立即叫总指挥部，宣布启用备用流程，不要自己继续尝试。这一条不等 3 分钟。'}
+    ]
+  },
+  {
+    id:'file2', cat:'文件打不开', src:'手册 v1.1 第 4 节「重要」原则',
+    kw:['马上要播','马上要放','马上用','急用','备用','备份在哪','来不及'],
+    steps:[
+      {t:'第一步：找备用 U 盘或备用机上的同内容备份，先保证「能播」——优先保证赛事不中断，宁可用现在能响的。\n成功标志：备用内容正常播放。\n没成功就回我：「没成功」。'},
+      {t:'找不到备份：立即叫总指挥部，宣布启用备用流程。不赌，不等。'}
+    ]
+  },
+  // ---- 找不到设备 / 卡顿 2 ----
+  {
+    id:'dev1', cat:'找不到设备', src:'手册 v1.1 提示词③、附录对照表',
+    kw:['找不到设备','未连接','没连上','连不上','不识别','识别不了','设备未'],
+    steps:[
+      {t:'第一步：看出问题的那台设备电源指示灯亮不亮——不亮先开电源；亮着就把它和电脑之间的那根线重新插拔一次，插到底，然后等 5 秒。\n成功标志：设备重新被识别。\n没成功就回我：「没成功」。'},
+      {t:'不要做：不要带电反复快插快拔——插拔一次后等 5 秒再试；不要同时动多根线。'},
+      {t:'还没好：联系总指挥部。3 分钟的线到了就停手。'}
+    ]
+  },
+  {
+    id:'lag1', cat:'卡顿', src:'手册 v1.1 第 2 节「没字」、提示词④',
+    kw:['卡顿','卡了','一顿一顿','一跳一跳','跳帧','停住','卡住','不动了','不流畅','定格',' Frozen','frozen'],
+    steps:[
+      {t:'分岔先判断：播放器上的进度条还在走吗？\n在走回我「在走」，不走回我「不走」。'},
+      {t:'【在走】关掉电脑上其他开着的程序窗口，只留播放器。\n【不走 / 一顿一顿】按一下「重播 / 上一个」再放一次。\n成功标志：画面恢复流畅连续。\n没成功就回我：「没成功」。'}
+    ],
+    next:[
+      {t:'还卡的话：拿手机把画面拍下来，联系现场技术负责人核对文件格式（编码不兼容是常见原因）。\n不要做：①不要中途关掉正在播的窗口再全屏开新窗口——切换瞬间必然黑屏 ②不要比赛中重启电脑。'},
+      {t:'两步还卡——联系总指挥部，启用备用方案（备用视频源）。'}
+    ]
+  },
+  // ---- 追问模板 1 ----
+  {
+    id:'ask1', cat:'说不清', src:'手册 v1.1 提示词⑤、第 2 节',
+    kw:['说不清','不知道','不清楚','不知道哪','出问题了','故障','出问题','帮帮我','怎么办'],
+    steps:[
+      {t:'别急，我帮你理。回答我三个问题里的任意一个就行：\n① 出问题的是什么设备——音响 / 大屏 / 播放器 / 别的？\n② 你看到、听到了什么——照原样说，比如「屏幕上有个框，写着英文」。\n③ 什么时候开始的，之前有没有人动过什么？'}
+    ],
+    next:[
+      {t:'还是对不上号的话：拿手机把屏幕拍下来，找现场技术负责人核对。\n如果出现红色警告、机器冒烟、有焦味——先断电，再叫人。'}
+    ]
+  },
+  // ---- 安全红线 2 ----
+  {
+    id:'red1', cat:'安全红线', src:'手册 v1.1 第 4 节',
+    kw:['冒烟','焦味','异味','火花','异响','烧了','着火','起火','红色警告','冒火','烫'],
+    danger:true,
+    steps:[
+      {t:'⚠ 危险情况，不用提示词，现在只做两件事：\n第一步：切断出问题那台设备的电源（只断它自己，不是总闸）。\n第二步：立刻叫人——总指挥部 / 现场技术负责人，同时让周围人离开。\n\n不要做：①不要做任何「修复」尝试 ②不要用水泼电器 ③不要独自处理火情。\n这一条没有「失败下一步」——叫人永远优先。'}
+    ]
+  },
+  {
+    id:'red2', cat:'安全红线', src:'手册 v1.1 第 4 节「什么时候必须停手」',
+    kw:['关机','重启','换机器','换电脑','换台','装软件','安装','下载','格式化','重置','还原','初始化','拆开','拆机','拆功放','拆设备','断电','断总电','总电','总闸','总电源','拔电源','拔插头','拔掉电源','拔了电源','删文件','删除文件','删掉文件','删了'],
+    danger:true,
+    steps:[
+      {t:'不能做。赛中进行时绝对不能做这 5 件事：\n① 关总电源、拔总插头——一断电全场黑屏，比分计时一起没；\n② 删任何文件——运动员音乐、会徽视频删掉就找不回来；\n③ 点「格式化 / 重置 / 还原 / 初始化」——一点就清空；\n④ 在机器上装东西、点下载——装一半机器直接废；\n⑤ 比赛中换机器——换必然断音断画面，宁可用现在能响的。\n\n现在可以安全做的：推子 / 音量 / 重新插线——把你的现象原样告诉我，我带你走安全路径。\n如果确实需要动这些，请联系总指挥部授权。'}
+    ]
+  },
+];
+
+// ---------- 超范围（边界拒答） ----------
+const OUT_OF_SCOPE = {
+  kw:['灯光','推流','直播','网络','wifi','WiFi','网线','音响改装','调音师','编曲','剪辑','字幕','摄影','摄像','拍照设置','空调','话筒型号','采购','预算'],
+  text:'这超出我的范围，请找现场技术负责人——我是专门为播放故障设计的。\n\n我只会处理这五类：没声音 / 没画面 / 文件打不开 / 找不到设备 / 卡顿。\n如果是这几类，用一句话告诉我现象。'
+};
+
+// ---------- 升级路径 ----------
+const UPGRADE = '先停手。已到升级线：\n① 3 分钟没解决，或运动员已上场 / 即将上场；\n② 同一个问题问过两次还没解决。\n现在就联系总指挥部，启用备用方案——优先保证赛事不中断，这一步不是失败，是设计。';
+
+// ---------- 匹配 ----------
+function tokenize(s){ return s.toLowerCase(); }
+function hit(kws, text){ const t = tokenize(text); return kws.some(k => t.includes(k.toLowerCase())); }
+
+function matchKB(text){
+  // 优先级 1：安全红线（危险词必拦）
+  for (const item of KB) if (item.danger && hit(item.kw, text)) return item;
+  // 优先级 2：超范围
+  if (hit(OUT_OF_SCOPE.kw, text)) return {outscope:true};
+  // 优先级 3：知识库
+  let best = null, bestScore = 0;
+  for (const item of KB){
+    if (item.danger) continue;
+    let score = 0;
+    for (const k of item.kw) if (tokenize(text).includes(k.toLowerCase())) score += k.length; // 长词权重高
+    if (score > bestScore){ bestScore = score; best = item; }
+  }
+  return best;
+}
+
+// ---------- 会话状态 ----------
+const chat = document.getElementById('chat');
+let ctx = {item:null, phase:'free', stepIdx:0, failCount:0};
+
+function now(){ const d=new Date(); return d.toTimeString().slice(0,5); }
+
+function addMsg(role, html, cls){
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + role;
+  const b = document.createElement('div');
+  b.className = 'bubble' + (cls ? ' ' + cls : '');
+  b.innerHTML = html;
+  wrap.appendChild(b); chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return b;
+}
+
+function botSay(text, danger, src){
+  const html = (danger?'<span class="step-title">⚠ 必须停手</span>':'') +
+    text.replace(/\n/g,'<br>') +
+    (src ? '<span class="src">依据：' + src + '</span>' : '');
+  const el = addMsg('bot', html, danger?'danger':'');
+}
+
+function typing(cb){
+  const t = addMsg('bot','<span class="typing"><i></i><i></i><i></i></span>');
+  setTimeout(()=>{ t.remove(); cb(); }, 500);
+}
+
+function sugButtons(list){
+  const s = document.createElement('div');
+  s.className = 'sugs';
+  list.forEach(txt=>{
+    const b = document.createElement('button');
+    b.className='sug'; b.textContent = txt;
+    b.onclick = ()=>{ s.remove(); userSend(txt); };
+    s.appendChild(b);
+  });
+  chat.appendChild(s); chat.scrollTop = chat.scrollHeight;
+}
+
+// ---------- 会话反馈判定（纯函数，否定优先） ----------
+// 教训：「没成功」包含「成功」——若先判成功会误报。现场宁可多给一步，不可误判过关。
+function feedbackIntent(text){
+  const t = tokenize(text);
+  const saidNo = /没成功|不行|还是没|没有成功|没用|无效|还没好|还没解决|没反应/.test(t);
+  const saidOk = !saidNo && /成功|好了|可以了|有声音|有画面|出声|解决了|恢复/.test(t);
+  return saidNo ? 'no' : (saidOk ? 'ok' : 'topic');
+}
+
+// ---------- 主流程 ----------
+function handle(text){
+  const t = tokenize(text);
+
+  // 会话进行中的反馈优先
+  if (ctx.phase === 'stepping'){
+    const intent = feedbackIntent(text);
+    if (intent === 'ok'){
+      ctx.phase='free';
+      botSay('好，这一关过了。盯住现场，有新情况随时告诉我。\n稳妥起见：刚才动过的线 / 推子，比赛结束后记得复位。', false);
+      sugButtons(['还有别的问题','没了']);
+      return;
+    }
+    if (intent === 'no'){
+      ctx.failCount++;
+      const nx = ctx.item.next;
+      if (nx && ctx.stepIdx < nx.length){
+        botSay(nx[ctx.stepIdx].t, false, ctx.item.src); ctx.stepIdx++;
+      } else {
+        botSay(UPGRADE, true);
+        ctx.phase='free';
+      }
+      return;
+    }
+    // 会话中换了新话题 → 重新匹配
+  }
+
+  // 新话题
+  const m = matchKB(text);
+  if (!m){
+    ctx.phase='free';
+    botSay('我需要再确认一下。回答任意一条就够：\n① 是哪类问题——没声音 / 没画面 / 文件打不开 / 找不到设备 / 卡顿？\n② 屏幕上有没有弹出提示框？\n③ 播放器的进度条还在走吗？', false);
+    sugButtons(['会场没声音了','大屏黑屏了','视频卡住不动']);
+    return;
+  }
+  if (m.outscope){
+    ctx.phase='free';
+    botSay(OUT_OF_SCOPE.text, false);
+    sugButtons(['会场没声音了','大屏黑屏了','视频卡住不动']);
+    return;
+  }
+
+  ctx.item = m; ctx.stepIdx = 0; ctx.failCount = 0;
+  if (m.next && m.next.length){
+    ctx.phase = 'stepping';
+  } else {
+    ctx.phase = 'free';
+  }
+  botSay(m.steps.map(s=>s.t).join('\n'), !!m.danger, m.src);
+  if (m.id==='pic1') sugButtons(['有字','没字']);
+  if (m.id==='lag1') sugButtons(['在走','不走']);
+  if (m.id==='ask1') sugButtons(['音响没声了','大屏黑屏了','视频卡住了']);
+}
+
+// ---------- UI 事件 ----------
+function userSend(text){
+  if (!text.trim()) return;
+  addMsg('user', text.replace(/</g,'&lt;').replace(/>/g,'&gt;'));
+  typing(()=> handle(text));
+}
+
+document.getElementById('form').addEventListener('submit', e=>{
+  e.preventDefault();
+  const inp = document.getElementById('inp');
+  userSend(inp.value); inp.value='';
+});
+
+// 开场白（合规显式标识在 header 常驻，这里做引导）
+botSay('你好，我是现场应急助手。用一句话告诉我现在怎么了，比如：\n· "会场没声音了"\n· "大屏黑屏，上面有个提示框"\n· "视频卡住不动"\n我会一步一步带你处理。如果 3 分钟没解决，我会告诉你该找谁。', false);
+sugButtons(['会场没声音了','大屏黑屏了','视频卡住不动']);
+</script>
+</body>
+</html>
